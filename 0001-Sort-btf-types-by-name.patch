@@ -1,0 +1,104 @@
+From 83f9213ac6bd86aa6cd093c5243a5f0823c87ec2 Mon Sep 17 00:00:00 2001
+From: Donglin Peng <dolinux.peng@gmail.com>
+Date: Mon, 27 Oct 2025 21:37:39 +0800
+Subject: [PATCH] Sort btf types by name
+
+Signed-off-by: pengdonglin <pengdonglin@xiaomi.com>
+Signed-off-by: Donglin Peng <dolinux.peng@gmail.com>
+---
+ btf_encoder.c | 72 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 72 insertions(+)
+
+diff --git a/btf_encoder.c b/btf_encoder.c
+index 0bc23349b5d7..5560c42858ae 100644
+--- a/btf_encoder.c
++++ b/btf_encoder.c
+@@ -2078,6 +2078,74 @@ out:
+ 	return err;
+ }
+ 
++static inline bool str_is_empty(const char *s)
++{
++	return !s || !s[0];
++}
++
++static int cmp_type_names(const void *a, const void *b, void *priv)
++{
++	struct btf *btf = (struct btf *)priv;
++	const struct btf_type *ta = btf__type_by_id(btf, *(__u32 *)a);
++	const struct btf_type *tb = btf__type_by_id(btf, *(__u32 *)b);
++	const char *na, *nb;
++	bool anon_a, anon_b;
++
++	na = btf__str_by_offset(btf, ta->name_off);
++	nb = btf__str_by_offset(btf, tb->name_off);
++	anon_a = str_is_empty(na);
++	anon_b = str_is_empty(nb);
++
++	/* ta w/o name is greater than tb */
++	if (anon_a && !anon_b)
++		return 1;
++	/* tb w/o name is smaller than ta */
++	if (!anon_a && anon_b)
++		return -1;
++	if (anon_a && anon_b)
++		return 0;
++
++	return strcmp(na, nb);
++}
++
++static int btf_encoder__sort(struct btf *btf)
++{
++	const struct btf *base_btf = btf__base_btf(btf);
++	LIBBPF_OPTS(btf_permute_opts, opts);
++	int start_id = 1;
++	int nr_types;
++	__u32 *permute_ids;
++	int i, id, err = 0;
++
++	if (base_btf)
++		start_id = btf__type_cnt(base_btf);
++	nr_types = btf__type_cnt(btf) - start_id;
++
++	if (nr_types < 2)
++		return 0;
++
++	permute_ids = calloc(nr_types, sizeof(*permute_ids));
++	if (!permute_ids) {
++		err = -ENOMEM;
++		goto out_free;
++	}
++
++	for (i = 0, id = start_id; i < nr_types; i++, id++)
++		permute_ids[i] = id;
++
++	qsort_r(permute_ids, nr_types, sizeof(*permute_ids),
++		cmp_type_names, btf);
++
++	err = btf__permute(btf, permute_ids, NULL);
++	if (err)
++		goto out_free;
++
++out_free:
++	if (permute_ids)
++		free(permute_ids);
++	return err;
++}
++
+ int btf_encoder__encode(struct btf_encoder *encoder, struct conf_load *conf)
+ {
+ 	int err;
+@@ -2099,6 +2167,10 @@ int btf_encoder__encode(struct btf_encoder *encoder, struct conf_load *conf)
+ 		fprintf(stderr, "%s: btf__dedup failed!\n", __func__);
+ 		return -1;
+ 	}
++	if (btf_encoder__sort(encoder->btf)) {
++		fprintf(stderr, "%s: btf_encode__sort failed!\n", __func__);
++		return -1;
++	}
+ 	if (encoder->raw_output) {
+ 		err = btf_encoder__write_raw_file(encoder);
+ 	} else {
+-- 
+2.34.1
+

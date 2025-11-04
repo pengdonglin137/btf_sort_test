@@ -1,0 +1,51 @@
+From 308c6adcbeb25e7ff2a2bfebef5629445ecaa65f Mon Sep 17 00:00:00 2001
+From: Donglin Peng <dolinux.peng@gmail.com>
+Date: Tue, 4 Nov 2025 21:03:39 +0800
+Subject: [PATCH] Add performance test code
+
+JIRA-ID
+
+Signed-off-by: pengdonglin <pengdonglin@xiaomi.com>
+Signed-off-by: Donglin Peng <dolinux.peng@gmail.com>
+---
+ kernel/bpf/btf.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/bpf/btf.c b/kernel/bpf/btf.c
+index 3762f896f0a4..e30b889a1688 100644
+--- a/kernel/bpf/btf.c
++++ b/kernel/bpf/btf.c
+@@ -582,14 +582,19 @@ static void btf_check_sorted(struct btf *btf, int start_id)
+ 	const struct btf_type *t;
+ 	int i, n, nr_sorted_types;
+ 
++	ktime_t start;
++	long elapse;
++
+ 	if (likely(btf->nr_sorted_types != BTF_NEED_SORT_CHECK))
+ 		return;
+-
+ 	btf->nr_sorted_types = 0;
+ 
+ 	if (btf->nr_types < 2)
+ 		return;
+ 
++	pr_info("NR_TYPES: %d\n", btf->nr_types);
++	start = ktime_get();
++
+ 	nr_sorted_types = 0;
+ 	n = btf_nr_types(btf);
+ 	for (n--, i = start_id; i < n; i++) {
+@@ -609,6 +614,9 @@ static void btf_check_sorted(struct btf *btf, int start_id)
+ 
+ 	if (nr_sorted_types)
+ 		btf->nr_sorted_types = nr_sorted_types;
++
++	elapse = ktime_to_us(ktime_sub(ktime_get(), start));
++	pr_info("%s consume: %lu us\n", __func__, elapse);
+ }
+ 
+ /*
+-- 
+2.34.1
+

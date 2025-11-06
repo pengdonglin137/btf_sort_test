@@ -1,61 +1,67 @@
-From 56540575e49357bb54803384fbdb1845ca3a2b32 Mon Sep 17 00:00:00 2001
-From: Donglin Peng <dolinux.peng@gmail.com>
-Date: Tue, 4 Nov 2025 20:29:44 +0800
-Subject: [PATCH] Add btf__test_find_perf
-
-Signed-off-by: pengdonglin <pengdonglin@xiaomi.com>
-Signed-off-by: Donglin Peng <dolinux.peng@gmail.com>
----
- tools/lib/bpf/btf.c                           | 65 +++++++++++++++++++
- tools/lib/bpf/btf.h                           |  1 +
- tools/lib/bpf/libbpf.map                      |  1 +
- .../selftests/bpf/prog_tests/btf_permute.c    |  7 ++
- 4 files changed, 74 insertions(+)
-
-diff --git a/tools/lib/bpf/btf.c b/tools/lib/bpf/btf.c
-index d4ef81ac57fa..0b59853b5de6 100644
---- a/tools/lib/bpf/btf.c
-+++ b/tools/lib/bpf/btf.c
-@@ -6161,3 +6161,68 @@ static int btf_permute_remap_types(struct btf_permute *p)
- 	return btf_remap_types(p->btf, p->btf_ext, btf_permute_remap_type_id, p);
- }
+diff --git a/tools/testing/selftests/bpf/prog_tests/btf_permute.c b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
+index edab03742598..6e261e2659f0 100644
+--- a/tools/testing/selftests/bpf/prog_tests/btf_permute.c
++++ b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
+@@ -1,10 +1,18 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /* Copyright (c) 2025 Xiaomi */
  
 +#include <sys/time.h>
-+
++#include <sys/stat.h>
+ #include <test_progs.h>
+ #include <bpf/btf.h>
+ #include "btf_helpers.h"
+ 
 +struct btf_test_meta {
 +	const char *name;
 +	__u32 kind;
 +	__u32 id;
 +};
 +
-+int btf__test_find_perf(void)
+ /* Ensure btf__permute work as expected with base_btf */
+ static void test_permute_base(void)
+ {
+@@ -266,6 +274,90 @@ static void test_permute_drop_split(void)
+ 	btf__free(base_btf);
+ }
+ 
++static void test_permute_perf_fn(void)
 +{
-+	struct btf *btf = btf__load_vmlinux_btf();
++	const char *sysfs_btf_path = "/sys/kernel/btf/vmlinux";
++	struct stat st;
++	struct btf *btf;
 +	const struct btf_type *t;
 +	struct btf_test_meta *tm = NULL;
 +	struct timeval start, end;
-+	long elapsed;
-+	__u32 n = btf__type_cnt(btf);
++	long total, elapsed[10];
++	__u32 n, start_id = 1;
 +	__u8 *str_ref = NULL;
-+	int i, j;
-+	int ret;
++	int i, j, ret, count;
 +	bool test_fail = false;
 +
-+	str_ref = calloc(btf->hdr->str_len, sizeof(str_ref));
-+	tm = calloc(btf->nr_types, sizeof(*tm));
-+	if (!str_ref || !tm) {
-+		pr_warn("alloc memory failed\n");
-+		return -ENOMEM;
-+	}
++	btf = btf__load_vmlinux_btf();
++	if (!ASSERT_OK_PTR(btf, "load_vmlinux_btf"))
++		return;
++	n = btf__type_cnt(btf);
++	ret = stat(sysfs_btf_path, &st);
++	if (!ASSERT_OK(ret, "stat"))
++		return;
++	str_ref = calloc(st.st_size, sizeof(str_ref));
++	if (!ASSERT_OK_PTR(str_ref, "calloc_str_ref"))
++		return;
++	tm = calloc(n, sizeof(*tm));
++	if (!ASSERT_OK_PTR(tm, "calloc_tm"))
++		return;
 +
-+	for (i = btf->start_id; i < n; i++) {
-+		t = btf_type_by_id(btf, i);
++	for (i = start_id; i < n; i++) {
++		t = btf__type_by_id(btf, i);
 +		if (str_ref[t->name_off] < 2)
 +			str_ref[t->name_off]++;
 +	}
 +
-+	for (j = 0, i = btf->start_id; i < n; i++) {
-+		t = btf_type_by_id(btf, i);
++	/* Only consider types without share name with others */
++	for (j = 0, i = start_id; i < n; i++) {
++		t = btf__type_by_id(btf, i);
 +		if (str_ref[t->name_off] != 1)
 +			continue;
 +		tm[j].id = i;
@@ -64,71 +70,52 @@ index d4ef81ac57fa..0b59853b5de6 100644
 +		j++;
 +	}
 +
-+	pr_info("Test to find %d types:\n", j);
++	count = ARRAY_SIZE(elapsed);
++	total = 0;
++	printf("Test to find %d types %d times:\n", j, count);
 +
++	/* ignore sort check overhead */
++	btf__find_by_name_kind(btf, tm[0].name, tm[0].kind);
++
++repeat:
 +	gettimeofday(&start, NULL);
 +	for (i = 0; i < j; i++) {
 +		ret = btf__find_by_name_kind(btf, tm[i].name, tm[i].kind);
 +		if (ret != tm[i].id) {
-+			pr_warn("test fail: actual %d, expect: %d for %s\n",
++			fprintf(stderr, "test fail: actual %d, expect: %d for %s\n",
 +				ret, tm[i].id, tm[i].name);
 +			test_fail = true;
 +		}
 +	}
 +	gettimeofday(&end, NULL);
 +
-+	elapsed = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_usec - start.tv_usec);
-+	pr_info("Consume: %ld ms\n", elapsed/1000);
++	elapsed[count-1] = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_usec - start.tv_usec);
++	printf("Consume: %ld us\n", elapsed[count - 1]);
++	total += elapsed[count - 1];
++
++	if (--count > 0)
++		goto repeat;
++
++	printf("average: %ld us\n", total/ARRAY_SIZE(elapsed));
 +
 +	btf__free(btf);
 +	free(str_ref);
 +	free(tm);
-+	return !!test_fail;
++	ASSERT_OK(test_fail, "find_perf");
 +}
-diff --git a/tools/lib/bpf/btf.h b/tools/lib/bpf/btf.h
-index 441f6445d762..88203614c255 100644
---- a/tools/lib/bpf/btf.h
-+++ b/tools/lib/bpf/btf.h
-@@ -163,6 +163,7 @@ LIBBPF_API void btf__set_fd(struct btf *btf, int fd);
- LIBBPF_API const void *btf__raw_data(const struct btf *btf, __u32 *size);
- LIBBPF_API const char *btf__name_by_offset(const struct btf *btf, __u32 offset);
- LIBBPF_API const char *btf__str_by_offset(const struct btf *btf, __u32 offset);
-+LIBBPF_API int btf__test_find_perf(void);
- 
- LIBBPF_API struct btf_ext *btf_ext__new(const __u8 *data, __u32 size);
- LIBBPF_API void btf_ext__free(struct btf_ext *btf_ext);
-diff --git a/tools/lib/bpf/libbpf.map b/tools/lib/bpf/libbpf.map
-index b778e5a5d0a8..62d6f311b6ed 100644
---- a/tools/lib/bpf/libbpf.map
-+++ b/tools/lib/bpf/libbpf.map
-@@ -452,4 +452,5 @@ LIBBPF_1.7.0 {
- 		bpf_map__set_exclusive_program;
- 		bpf_map__exclusive_program;
- 		btf__permute;
-+		btf__test_find_perf;
- } LIBBPF_1.6.0;
-diff --git a/tools/testing/selftests/bpf/prog_tests/btf_permute.c b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
-index 2692cef627ab..cc8a0f698f54 100644
---- a/tools/testing/selftests/bpf/prog_tests/btf_permute.c
-+++ b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
-@@ -133,10 +133,17 @@ static void test_permute_split(void)
- 	btf__free(base_btf);
- }
- 
++
 +static void test_permute_perf(void)
 +{
-+	btf__test_find_perf();
++	test_permute_perf_fn();
 +}
 +
  void test_btf_permute(void)
  {
  	if (test__start_subtest("permute_base"))
- 		test_permute_base();
- 	if (test__start_subtest("permute_split"))
- 		test_permute_split();
+@@ -276,4 +368,6 @@ void test_btf_permute(void)
+ 		test_permute_drop_base();
+ 	if (test__start_subtest("permute_drop_split"))
+ 		test_permute_drop_split();
 +	if (test__start_subtest("perf"))
 +		test_permute_perf();
  }
--- 
-2.34.1
-

@@ -1,5 +1,5 @@
 diff --git a/tools/testing/selftests/bpf/prog_tests/btf_permute.c b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
-index edab03742598..6e261e2659f0 100644
+index f67bf89519b3..3acc1ce63e04 100644
 --- a/tools/testing/selftests/bpf/prog_tests/btf_permute.c
 +++ b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
 @@ -1,10 +1,18 @@
@@ -18,11 +18,11 @@ index edab03742598..6e261e2659f0 100644
 +	__u32 id;
 +};
 +
- /* Ensure btf__permute work as expected with base_btf */
+ /* Ensure btf__permute work as expected with base BTF */
  static void test_permute_base(void)
  {
-@@ -266,6 +274,90 @@ static void test_permute_drop_split(void)
- 	btf__free(base_btf);
+@@ -593,6 +601,90 @@ static void test_permute_drop_dedup(void)
+ 	btf__free(new_btf);
  }
  
 +static void test_permute_perf_fn(void)
@@ -112,10 +112,10 @@ index edab03742598..6e261e2659f0 100644
  void test_btf_permute(void)
  {
  	if (test__start_subtest("permute_base"))
-@@ -276,4 +368,6 @@ void test_btf_permute(void)
- 		test_permute_drop_base();
- 	if (test__start_subtest("permute_drop_split"))
+@@ -605,4 +697,6 @@ void test_btf_permute(void)
  		test_permute_drop_split();
+ 	if (test__start_subtest("permute_drop_dedup"))
+ 		test_permute_drop_dedup();
 +	if (test__start_subtest("perf"))
 +		test_permute_perf();
  }

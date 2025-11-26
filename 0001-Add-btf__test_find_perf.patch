@@ -1,5 +1,5 @@
 diff --git a/tools/testing/selftests/bpf/prog_tests/btf_permute.c b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
-index f67bf89519b3..3acc1ce63e04 100644
+index 9aa71cdf984a..d5025dd49eb3 100644
 --- a/tools/testing/selftests/bpf/prog_tests/btf_permute.c
 +++ b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
 @@ -1,10 +1,18 @@
@@ -18,11 +18,11 @@ index f67bf89519b3..3acc1ce63e04 100644
 +	__u32 id;
 +};
 +
- /* Ensure btf__permute work as expected with base BTF */
- static void test_permute_base(void)
+ static void permute_base_check(struct btf *btf)
  {
-@@ -593,6 +601,90 @@ static void test_permute_drop_dedup(void)
- 	btf__free(new_btf);
+ 	VALIDATE_RAW_BTF(
+@@ -219,10 +227,93 @@ static void test_permute_split(void)
+ 	btf__free(base_btf);
  }
  
 +static void test_permute_perf_fn(void)
@@ -35,7 +35,7 @@ index f67bf89519b3..3acc1ce63e04 100644
 +	struct timeval start, end;
 +	long total, elapsed[10];
 +	__u32 n, start_id = 1;
-+	__u8 *str_ref = NULL;
++	__u32 *str_ref = NULL;
 +	int i, j, ret, count;
 +	bool test_fail = false;
 +
@@ -46,7 +46,7 @@ index f67bf89519b3..3acc1ce63e04 100644
 +	ret = stat(sysfs_btf_path, &st);
 +	if (!ASSERT_OK(ret, "stat"))
 +		return;
-+	str_ref = calloc(st.st_size, sizeof(str_ref));
++	str_ref = calloc(st.st_size, sizeof(*str_ref));
 +	if (!ASSERT_OK_PTR(str_ref, "calloc_str_ref"))
 +		return;
 +	tm = calloc(n, sizeof(*tm));
@@ -55,15 +55,15 @@ index f67bf89519b3..3acc1ce63e04 100644
 +
 +	for (i = start_id; i < n; i++) {
 +		t = btf__type_by_id(btf, i);
-+		if (str_ref[t->name_off] < 2)
-+			str_ref[t->name_off]++;
++		if (t->name_off && !str_ref[t->name_off])
++			str_ref[t->name_off] = i;
 +	}
 +
-+	/* Only consider types without share name with others */
 +	for (j = 0, i = start_id; i < n; i++) {
 +		t = btf__type_by_id(btf, i);
-+		if (str_ref[t->name_off] != 1)
++		if (str_ref[t->name_off] == 0)
 +			continue;
++		str_ref[t->name_off] = 0;
 +		tm[j].id = i;
 +		tm[j].name = btf__str_by_offset(btf, t->name_off);;
 +		tm[j].kind = btf_kind(t);
@@ -73,9 +73,6 @@ index f67bf89519b3..3acc1ce63e04 100644
 +	count = ARRAY_SIZE(elapsed);
 +	total = 0;
 +	printf("Test to find %d types %d times:\n", j, count);
-+
-+	/* ignore sort check overhead */
-+	btf__find_by_name_kind(btf, tm[0].name, tm[0].kind);
 +
 +repeat:
 +	gettimeofday(&start, NULL);
@@ -112,10 +109,9 @@ index f67bf89519b3..3acc1ce63e04 100644
  void test_btf_permute(void)
  {
  	if (test__start_subtest("permute_base"))
-@@ -605,4 +697,6 @@ void test_btf_permute(void)
- 		test_permute_drop_split();
- 	if (test__start_subtest("permute_drop_dedup"))
- 		test_permute_drop_dedup();
+ 		test_permute_base();
+ 	if (test__start_subtest("permute_split"))
+ 		test_permute_split();
 +	if (test__start_subtest("perf"))
 +		test_permute_perf();
  }

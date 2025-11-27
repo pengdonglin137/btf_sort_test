@@ -1,5 +1,5 @@
 diff --git a/tools/testing/selftests/bpf/prog_tests/btf_permute.c b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
-index 9aa71cdf984a..d5025dd49eb3 100644
+index 9aa71cdf984a..23c70b72cdf4 100644
 --- a/tools/testing/selftests/bpf/prog_tests/btf_permute.c
 +++ b/tools/testing/selftests/bpf/prog_tests/btf_permute.c
 @@ -1,10 +1,18 @@
@@ -21,83 +21,97 @@ index 9aa71cdf984a..d5025dd49eb3 100644
  static void permute_base_check(struct btf *btf)
  {
  	VALIDATE_RAW_BTF(
-@@ -219,10 +227,93 @@ static void test_permute_split(void)
+@@ -219,10 +227,107 @@ static void test_permute_split(void)
  	btf__free(base_btf);
  }
  
 +static void test_permute_perf_fn(void)
 +{
-+	const char *sysfs_btf_path = "/sys/kernel/btf/vmlinux";
 +	struct stat st;
 +	struct btf *btf;
 +	const struct btf_type *t;
 +	struct btf_test_meta *tm = NULL;
 +	struct timeval start, end;
-+	long total, elapsed[10];
++	long total, elapsed[5], avg_s, avg_ns;
 +	__u32 n, start_id = 1;
 +	__u32 *str_ref = NULL;
 +	int i, j, ret, count;
 +	bool test_fail = false;
++	const char *vmlinux_btf_paths[] = {
++		"./vmlinux_sorted.btf",
++		"./vmlinux_notsorted.btf",
++	};
 +
-+	btf = btf__load_vmlinux_btf();
-+	if (!ASSERT_OK_PTR(btf, "load_vmlinux_btf"))
-+		return;
-+	n = btf__type_cnt(btf);
-+	ret = stat(sysfs_btf_path, &st);
-+	if (!ASSERT_OK(ret, "stat"))
-+		return;
-+	str_ref = calloc(st.st_size, sizeof(*str_ref));
-+	if (!ASSERT_OK_PTR(str_ref, "calloc_str_ref"))
-+		return;
-+	tm = calloc(n, sizeof(*tm));
-+	if (!ASSERT_OK_PTR(tm, "calloc_tm"))
-+		return;
++	for (int loop = 0; loop < ARRAY_SIZE(vmlinux_btf_paths); loop++) {
++		btf = btf__parse_raw(vmlinux_btf_paths[loop]);;
++		if (!ASSERT_OK_PTR(btf, "load_vmlinux_btf"))
++			return;
++		n = btf__type_cnt(btf);
++		ret = stat(vmlinux_btf_paths[loop], &st);
++		if (!ASSERT_OK(ret, "stat"))
++			return;
++		str_ref = calloc(st.st_size, sizeof(*str_ref));
++		if (!ASSERT_OK_PTR(str_ref, "calloc_str_ref"))
++			return;
++		tm = calloc(n, sizeof(*tm));
++		if (!ASSERT_OK_PTR(tm, "calloc_tm"))
++			return;
 +
-+	for (i = start_id; i < n; i++) {
-+		t = btf__type_by_id(btf, i);
-+		if (t->name_off && !str_ref[t->name_off])
-+			str_ref[t->name_off] = i;
-+	}
++		for (i = start_id; i < n; i++) {
++			t = btf__type_by_id(btf, i);
++			if (t->name_off && !str_ref[t->name_off])
++				str_ref[t->name_off] = i;
++		}
 +
-+	for (j = 0, i = start_id; i < n; i++) {
-+		t = btf__type_by_id(btf, i);
-+		if (str_ref[t->name_off] == 0)
-+			continue;
-+		str_ref[t->name_off] = 0;
-+		tm[j].id = i;
-+		tm[j].name = btf__str_by_offset(btf, t->name_off);;
-+		tm[j].kind = btf_kind(t);
-+		j++;
-+	}
++		for (j = 0, i = start_id; i < n; i++) {
++			t = btf__type_by_id(btf, i);
++			if (str_ref[t->name_off] == 0)
++				continue;
++			str_ref[t->name_off] = 0;
++			tm[j].id = i;
++			tm[j].name = btf__str_by_offset(btf, t->name_off);;
++			tm[j].kind = btf_kind(t);
++			j++;
++		}
 +
-+	count = ARRAY_SIZE(elapsed);
-+	total = 0;
-+	printf("Test to find %d types %d times:\n", j, count);
++		count = ARRAY_SIZE(elapsed);
++		total = 0;
++		printf("Test to find %d types of %s %d times:\n", j,
++			vmlinux_btf_paths[loop], count);
 +
 +repeat:
-+	gettimeofday(&start, NULL);
-+	for (i = 0; i < j; i++) {
-+		ret = btf__find_by_name_kind(btf, tm[i].name, tm[i].kind);
-+		if (ret != tm[i].id) {
-+			fprintf(stderr, "test fail: actual %d, expect: %d for %s\n",
-+				ret, tm[i].id, tm[i].name);
-+			test_fail = true;
++		gettimeofday(&start, NULL);
++		for (i = 0; i < j; i++) {
++			ret = btf__find_by_name_kind(btf, tm[i].name, tm[i].kind);
++			if (ret != tm[i].id) {
++				fprintf(stderr, "test fail: actual %d, expect: %d for %s\n",
++					ret, tm[i].id, tm[i].name);
++				test_fail = true;
++			}
 +		}
++		gettimeofday(&end, NULL);
++
++		elapsed[count-1] = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_usec - start.tv_usec);
++		printf("Consume: %ld us\n", elapsed[count - 1]);
++		total += elapsed[count - 1];
++
++		if (--count > 0)
++			goto repeat;
++
++		if (loop == 0)
++			avg_s = total/ARRAY_SIZE(elapsed);
++		else
++			avg_ns = total/ARRAY_SIZE(elapsed);
++
++		printf("average: %ld us\n", total/ARRAY_SIZE(elapsed));
++
++		btf__free(btf);
++		free(str_ref);
++		free(tm);
 +	}
-+	gettimeofday(&end, NULL);
 +
-+	elapsed[count-1] = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_usec - start.tv_usec);
-+	printf("Consume: %ld us\n", elapsed[count - 1]);
-+	total += elapsed[count - 1];
++	printf("Gain: %ldx\n", avg_ns / avg_s);
 +
-+	if (--count > 0)
-+		goto repeat;
-+
-+	printf("average: %ld us\n", total/ARRAY_SIZE(elapsed));
-+
-+	btf__free(btf);
-+	free(str_ref);
-+	free(tm);
 +	ASSERT_OK(test_fail, "find_perf");
 +}
 +
